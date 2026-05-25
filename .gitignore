@@ -1,0 +1,10 @@
+__pyccache__/
+
+renv/
+
+.env
+
+.git
+
+.sqlite3
+
