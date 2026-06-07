@@ -9,7 +9,29 @@ collection = client.get_or_create_collection(
     name="pdf_docs"
 )
 
+def delete_existing_document(
+    filename
+):
+
+    existing = collection.get(
+        where={
+            "source": filename
+        }
+    )
+
+    ids = existing["ids"]
+
+    if ids:
+
+        collection.delete(
+            ids=ids
+        )
+
 def store_chunks(chunks, filename, generate_embedding):
+
+    delete_existing_document(
+        filename
+    )
 
     documents = []
     embeddings = []
