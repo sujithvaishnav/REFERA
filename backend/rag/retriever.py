@@ -3,6 +3,36 @@ from rag.embeddings import generate_embedding
 
 from rank_bm25 import BM25Okapi
 
+bm25_index = None
+bm25_documents = []
+bm25_metadatas = []
+
+def build_bm25_index():
+
+    global bm25_index
+    global bm25_documents
+    global bm25_metadatas
+
+    data = collection.get()
+
+    bm25_documents = data["documents"]
+    bm25_metadatas = data["metadatas"]
+
+    tokenized_docs = [
+        doc.split()
+        for doc in bm25_documents
+    ]
+
+    if len(tokenized_docs) == 0:
+        bm25_index = None
+        return
+
+    bm25_index = BM25Okapi(tokenized_docs)
+
+    print(
+        f"BM25 index built with {len(bm25_documents)} chunks"
+    )
+
 def retrieve(query, top_k=5, selected_docs=None):
 
     query_embedding = generate_embedding(query)
@@ -40,26 +70,28 @@ def retrieve(query, top_k=5, selected_docs=None):
 
 def bm25_search(
     query,
-    top_k=5
+    top_k=5,
+    selected_docs=None
 ):
 
-    data = collection.get()
+    global bm25_index
+    global bm25_documents
+    global bm25_metadatas
 
-    documents = data["documents"]
-    metadatas = data["metadatas"]
+    if bm25_index is None:
 
-    tokenized_docs = [
-        doc.split()
-        for doc in documents
-    ]
+        build_bm25_index()
 
-    bm25 = BM25Okapi(
-        tokenized_docs
-    )
+    if bm25_index is None:
+
+        return {
+            "documents": [[]],
+            "metadatas": [[]]
+        }
 
     tokenized_query = query.split()
 
-    scores = bm25.get_scores(
+    scores = bm25_index.get_scores(
         tokenized_query
     )
 
@@ -67,20 +99,31 @@ def bm25_search(
         range(len(scores)),
         key=lambda i: scores[i],
         reverse=True
-    )[:top_k]
+    )
 
     retrieved_docs = []
     retrieved_meta = []
 
     for idx in ranked_indices:
 
+        metadata = bm25_metadatas[idx]
+
+        if (
+            selected_docs is not None and
+            metadata["source"] not in selected_docs
+        ):
+            continue
+
         retrieved_docs.append(
-            documents[idx]
+            bm25_documents[idx]
         )
 
         retrieved_meta.append(
-            metadatas[idx]
+            metadata
         )
+
+        if len(retrieved_docs) >= top_k:
+            break
 
     return {
         "documents": [retrieved_docs],

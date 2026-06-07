@@ -11,6 +11,7 @@ from rag.retriever import hybrid_retrieve
 from rag.generator import generate_answer
 from rag.vectordb import collection
 from rag.reranker import rerank_documents
+from rag.retriever import build_bm25_index
 
 
 from fastapi.responses import StreamingResponse
@@ -56,6 +57,8 @@ async def upload_pdf(file: UploadFile = File(...)):
         file.filename,
         generate_embedding
     )
+
+    build_bm25_index()
 
     return {
         "message": "PDF uploaded successfully"
