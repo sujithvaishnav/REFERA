@@ -83,13 +83,6 @@ def bm25_search(
             "BM25 index not initialized. Upload a document first."
         )
 
-    if bm25_index is None:
-
-        return {
-            "documents": [[]],
-            "metadatas": [[]]
-        }
-
     tokenized_query = query.split()
 
     scores = bm25_index.get_scores(
