@@ -94,7 +94,8 @@ def ask_question(query: str,selected_docs: str = None):
         docs_filter = selected_docs.split(",")
     
     retrieved_docs = hybrid_retrieve(
-            enhanced_query
+            enhanced_query,
+            selected_docs=docs_filter
         )
 
     retrieved_docs = rerank_documents(
