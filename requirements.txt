@@ -1,5 +1,6 @@
 streamlit
 chromadb
+torchvision
 sentence-transformers
 langchain-text-splitters
 rank-bm25
