@@ -1,10 +1,23 @@
 # app.py
 import streamlit as st
-import requests
-import sseclient
 import json
 from datetime import datetime
 import time
+import os
+import sys
+
+# Add backend directory to sys.path so RAG pipeline modules can be imported directly
+backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+if backend_dir not in sys.path:
+    sys.path.insert(0, backend_dir)
+
+from rag.parser import extract_text_from_pdf
+from rag.chunker import chunk_text
+from rag.embeddings import generate_embedding
+from rag.vectordb import store_chunks, collection
+from rag.retriever import hybrid_retrieve, build_bm25_index
+from rag.generator import generate_answer
+from rag.reranker import rerank_documents
 
 # Custom CSS for better visual appeal
 st.markdown("""
@@ -187,25 +200,22 @@ with st.sidebar:
     # Fetch documents
     try:
         with st.spinner("Loading documents..."):
-            docs_response = requests.get(
-                "http://127.0.0.1:8000/documents",
-                timeout=5
-            )
+            data = collection.get()
+            metadatas = data.get("metadatas", [])
+            available_docs = list(set(
+                meta["source"]
+                for meta in metadatas
+                if meta and "source" in meta
+            ))
             
-            if docs_response.status_code == 200:
-                available_docs = docs_response.json()["documents"]
-                
-                selected_docs = st.multiselect(
-                    "📄 Select Documents to Query",
-                    available_docs,
-                    default=available_docs,
-                    help="Choose which documents to search through"
-                )
-            else:
-                st.error("⚠️ Could not fetch documents. Make sure the backend is running.")
-                selected_docs = []
-    except requests.exceptions.RequestException:
-        st.error("⚠️ Backend server not reachable. Please check if FastAPI is running on port 8000.")
+            selected_docs = st.multiselect(
+                "📄 Select Documents to Query",
+                available_docs,
+                default=available_docs,
+                help="Choose which documents to search through"
+            )
+    except Exception as e:
+        st.error(f"⚠️ Could not fetch documents from vector DB: {str(e)}")
         selected_docs = []
     
     st.markdown("---")
@@ -219,25 +229,33 @@ with st.sidebar:
     )
     
     if uploaded_file:
-        files = {"file": uploaded_file}
-        
         with st.spinner("Uploading and processing..."):
             try:
-                response = requests.post(
-                    "http://127.0.0.1:8000/upload",
-                    files=files,
-                    timeout=30
-                )
+                import tempfile
                 
-                if response.status_code == 200:
+                # Write uploaded file to a temporary file for parsing
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp_file:
+                    tmp_file.write(uploaded_file.getvalue())
+                    tmp_path = tmp_file.name
+                
+                try:
+                    pages = extract_text_from_pdf(tmp_path)
+                    chunks = chunk_text(pages)
+                    store_chunks(
+                        chunks,
+                        uploaded_file.name,
+                        generate_embedding
+                    )
+                    build_bm25_index()
                     st.success("✅ PDF uploaded and processed successfully!")
                     st.balloons()
                     time.sleep(1)
                     st.rerun()
-                else:
-                    st.error("❌ Upload failed. Please try again.")
-            except requests.exceptions.RequestException:
-                st.error("❌ Could not connect to backend server.")
+                finally:
+                    if os.path.exists(tmp_path):
+                        os.remove(tmp_path)
+            except Exception as e:
+                st.error(f"❌ Upload failed: {str(e)}")
     
     st.markdown("---")
     
@@ -297,67 +315,80 @@ if query and selected_docs:
     
     with st.chat_message("assistant"):
         response_container = st.empty()
-        full_response = ""
         
         try:
-            response = requests.get(
-                "http://127.0.0.1:8000/ask",
-                params={
-                    "query": query,
-                    "selected_docs": ",".join(selected_docs)
-                },
-                stream=True,
-                timeout=60
+            # Show loading animation
+            response_container.markdown('<div class="loading"></div> Thinking...', unsafe_allow_html=True)
+            
+            # Reconstruct conversation history (last 5 rounds)
+            conversation_context = ""
+            chat_pairs = []
+            for msg in st.session_state.messages[:-1]:
+                if msg["role"] == "user":
+                    chat_pairs.append({"question": msg["content"], "answer": ""})
+                elif msg["role"] == "assistant" and chat_pairs:
+                    chat_pairs[-1]["answer"] = msg["content"]
+            
+            for item in chat_pairs[-5:]:
+                conversation_context += f"\nUser: {item['question']}\nAssistant: {item['answer']}\n"
+            
+            enhanced_query = f"""
+            Previous Conversation:
+            {conversation_context}
+
+            Current Question:
+            {query}
+            """
+            
+            # Direct python calls instead of HTTP calls to FastAPI
+            retrieved_docs = hybrid_retrieve(
+                enhanced_query,
+                selected_docs=selected_docs
             )
             
-            if response.status_code == 200:
-                client = sseclient.SSEClient(response)
-                sources = []
-                
-                # Show loading animation
-                response_container.markdown('<div class="loading"></div> Thinking...', unsafe_allow_html=True)
-                
-                for event in client.events():
-                    data = json.loads(event.data)
-                    
-                    if "token" in data:
-                        full_response += data["token"]
-                        response_container.markdown(
-                            full_response + '<span class="loading"></span>',
-                            unsafe_allow_html=True
-                        )
-                    
-                    if "done" in data:
-                        response_container.markdown(full_response)
-                        sources = data.get("sources", [])
-                
-                # Add assistant message to history
-                st.session_state.messages.append({
-                    "role": "assistant",
-                    "content": full_response,
-                    "sources": sources
-                })
-                
-                # Display sources
-                if sources:
-                    with st.expander("📚 View Sources"):
-                        for i, source in enumerate(sources, 1):
-                            st.markdown(f"""
-                            <div class="source-card">
-                                <strong>Source {i}:</strong><br>
-                                📄 <strong>File:</strong> {source['source']}<br>
-                                📖 <strong>Page:</strong> {source['page']}<br>
-                                📝 <strong>Snippet:</strong><br>
-                                <em>{source['snippet'][:300]}{'...' if len(source['snippet']) > 300 else ''}</em>
-                            </div>
-                            """, unsafe_allow_html=True)
-            else:
-                st.error(f"❌ Backend error: {response.status_code}")
-                
-        except requests.exceptions.Timeout:
-            st.error("⏰ Request timed out. Please try again.")
-        except requests.exceptions.RequestException as e:
-            st.error(f"❌ Connection error: {str(e)}")
+            retrieved_docs = rerank_documents(
+                enhanced_query,
+                retrieved_docs,
+                top_k=5
+            )
+            
+            completion, sources = generate_answer(
+                enhanced_query,
+                retrieved_docs
+            )
+            
+            # Stream the generated response dynamically
+            def stream_generator():
+                for chunk in completion:
+                    content = chunk.choices[0].delta.content
+                    if content:
+                        yield content
+            
+            full_response = response_container.write_stream(stream_generator())
+            
+            # Add assistant message to history
+            st.session_state.messages.append({
+                "role": "assistant",
+                "content": full_response,
+                "sources": sources
+            })
+            
+            # Display sources
+            if sources:
+                with st.expander("📚 View Sources"):
+                    for i, source in enumerate(sources, 1):
+                        st.markdown(f"""
+                        <div class="source-card">
+                            <strong>Source {i}:</strong><br>
+                            📄 <strong>File:</strong> {source['source']}<br>
+                            📖 <strong>Page:</strong> {source['page']}<br>
+                            📝 <strong>Snippet:</strong><br>
+                            <em>{source['snippet'][:300]}{'...' if len(source['snippet']) > 300 else ''}</em>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        
+        except Exception as e:
+            st.error(f"❌ Error generating response: {str(e)}")
 
 elif query and not selected_docs:
     st.warning("⚠️ Please select at least one document to query.")
