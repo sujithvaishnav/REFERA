@@ -2,13 +2,10 @@ import chromadb
 import uuid
 import os
 
-CHROMA_PATH = os.path.join(
-    os.getcwd(),
-    "chroma_db"
-)
-
+# Resolve path relative to the backend directory
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 client = chromadb.PersistentClient(
-    path=CHROMA_PATH
+    path=os.path.join(BASE_DIR, "chroma_db")
 )
 
 collection = client.get_or_create_collection(
