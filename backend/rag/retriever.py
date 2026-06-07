@@ -90,17 +90,20 @@ def bm25_search(
 def hybrid_retrieve(
     query,
     top_k_dense=8,
-    top_k_bm25=5
+    top_k_bm25=5,
+    selected_docs=None
 ):
 
     dense_results = retrieve(
         query,
-        top_k=top_k_dense
+        top_k=top_k_dense,
+        selected_docs=selected_docs
     )
 
     bm25_results = bm25_search(
         query,
-        top_k=top_k_bm25
+        top_k=top_k_bm25,
+        selected_docs=selected_docs
     )
 
     combined_docs = []
