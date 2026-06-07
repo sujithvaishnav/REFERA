@@ -3,8 +3,11 @@ import streamlit as st
 import json
 from datetime import datetime
 import time
-import os
 import sys
+
+import os
+# Force pure-Python implementation of protobuf to prevent OpenTelemetry/Protobuf crashes on Python 3.14
+os.environ["PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION"] = "python"
 
 # Add backend directory to sys.path so RAG pipeline modules can be imported directly
 backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
