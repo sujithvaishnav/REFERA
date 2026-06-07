@@ -79,8 +79,9 @@ def bm25_search(
     global bm25_metadatas
 
     if bm25_index is None:
-
-        build_bm25_index()
+        raise RuntimeError(
+            "BM25 index not initialized. Upload a document first."
+        )
 
     if bm25_index is None:
 
