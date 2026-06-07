@@ -130,6 +130,72 @@ def bm25_search(
         "metadatas": [retrieved_meta]
     }
 
+def reciprocal_rank_fusion(
+    dense_docs,
+    dense_meta,
+    bm25_docs,
+    bm25_meta,
+    k=60
+):
+
+    scores = {}
+
+    # Dense results
+    for rank, (doc, meta) in enumerate(
+        zip(dense_docs, dense_meta),
+        start=1
+    ):
+
+        key = (
+            doc[:100],
+            meta["page"],
+            meta["source"]
+        )
+
+        if key not in scores:
+
+            scores[key] = {
+                "score": 0,
+                "doc": doc,
+                "meta": meta
+            }
+
+        scores[key]["score"] += (
+            1 / (k + rank)
+        )
+
+    # BM25 results
+    for rank, (doc, meta) in enumerate(
+        zip(bm25_docs, bm25_meta),
+        start=1
+    ):
+
+        key = (
+            doc[:100],
+            meta["page"],
+            meta["source"]
+        )
+
+        if key not in scores:
+
+            scores[key] = {
+                "score": 0,
+                "doc": doc,
+                "meta": meta
+            }
+
+        scores[key]["score"] += (
+            1 / (k + rank)
+        )
+
+    ranked = sorted(
+        scores.values(),
+        key=lambda x: x["score"],
+        reverse=True
+    )
+
+    return ranked
+
 def hybrid_retrieve(
     query,
     top_k_dense=8,
@@ -149,50 +215,22 @@ def hybrid_retrieve(
         selected_docs=selected_docs
     )
 
-    combined_docs = []
-    combined_meta = []
-
-    seen = set()
-
-    # Dense Retrieval Results
-
-    for doc, meta in zip(
+    fused_results = reciprocal_rank_fusion(
         dense_results["documents"][0],
-        dense_results["metadatas"][0]
-    ):
-
-        key = (
-            doc[:100],
-            meta["page"],
-            meta["source"]
-        )
-
-        if key not in seen:
-
-            seen.add(key)
-
-            combined_docs.append(doc)
-            combined_meta.append(meta)
-
-    # BM25 Results
-
-    for doc, meta in zip(
+        dense_results["metadatas"][0],
         bm25_results["documents"][0],
         bm25_results["metadatas"][0]
-    ):
+    )
 
-        key = (
-            doc[:100],
-            meta["page"],
-            meta["source"]
-        )
+    combined_docs = [
+        item["doc"]
+        for item in fused_results
+    ]
 
-        if key not in seen:
-
-            seen.add(key)
-
-            combined_docs.append(doc)
-            combined_meta.append(meta)
+    combined_meta = [
+        item["meta"]
+        for item in fused_results
+    ]
 
     return {
         "documents": [combined_docs],
