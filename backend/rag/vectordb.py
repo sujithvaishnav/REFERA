@@ -11,19 +11,36 @@ collection = client.get_or_create_collection(
 
 def store_chunks(chunks, filename, generate_embedding):
 
-    for i, chunk in enumerate(chunks):
+    documents = []
+    embeddings = []
+    metadatas = []
+    ids = []
 
-        embedding = generate_embedding(
+    for chunk in chunks:
+
+        documents.append(
             chunk["text"]
         )
 
-        collection.add(
-            documents=[chunk["text"]],
-            embeddings=[embedding],
-            metadatas=[{
-                "page": chunk["page"],
-                "source": filename,
-                "chunk_length": len(chunk["text"])
-            }],
-            ids=[str(uuid.uuid4())]
+        embeddings.append(
+            generate_embedding(
+                chunk["text"]
+            )
         )
+
+        metadatas.append({
+            "page": chunk["page"],
+            "source": filename,
+            "chunk_length": len(chunk["text"])
+        })
+
+        ids.append(
+            str(uuid.uuid4())
+        )
+
+    collection.add(
+        documents=documents,
+        embeddings=embeddings,
+        metadatas=metadatas,
+        ids=ids
+    )
