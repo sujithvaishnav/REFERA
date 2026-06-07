@@ -13,6 +13,12 @@ def rerank_documents(
     docs = retrieved_docs["documents"][0]
     metas = retrieved_docs["metadatas"][0]
 
+    if not docs:
+        return {
+            "documents": [[]],
+            "metadatas": [[]]
+        }
+
     pairs = []
 
     for doc in docs:
