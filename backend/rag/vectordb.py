@@ -1,74 +1,113 @@
-import chromadb
-import uuid
+from supabase import create_client, Client
+from dotenv import load_dotenv
 import os
+from rag.summarizer import generate_summary
 
-CHROMA_PATH = os.path.join(
-    os.getcwd(),
-    "chroma_db"
-)
+load_dotenv()
 
-client = chromadb.PersistentClient(
-    path=CHROMA_PATH
-)
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+SUPABASE_KEY = os.getenv("SUPABASE_KEY")
 
-collection = client.get_or_create_collection(
-    name="pdf_docs"
-)
+if not SUPABASE_URL or not SUPABASE_KEY:
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in the .env file")
 
-def delete_existing_document(
-    filename
-):
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
 
-    existing = collection.get(
-        where={
-            "source": filename
-        }
-    )
+def delete_existing_document(filename: str, user_id: str):
+    """
+    Deletes the document metadata and all associated chunks from Supabase by filename and user_id.
+    """
+    if not user_id or not filename:
+        return
+        
+    supabase.table("documents") \
+        .delete() \
+        .eq("filename", filename) \
+        .eq("user_id", user_id) \
+        .execute()
 
-    ids = existing["ids"]
+def delete_document_by_id(document_id: str, user_id: str):
+    """
+    Deletes the document and cascaded chunks by document UUID and user_id.
+    """
+    if not user_id or not document_id:
+        return
+        
+    supabase.table("documents") \
+        .delete() \
+        .eq("id", document_id) \
+        .eq("user_id", user_id) \
+        .execute()
 
-    if ids:
+def get_user_documents(user_id: str = None):
+    """
+    Retrieves all document records for a given user.
+    """
+    query = supabase.table("documents").select("id", "filename", "summary", "created_at")
+    if user_id:
+        query = query.eq("user_id", user_id)
+    response = query.order("created_at", desc=True).execute()
+    return response.data or []
 
-        collection.delete(
-            ids=ids
-        )
+def store_chunks(chunks, filename: str, generate_embedding, user_id: str = None):
+    """
+    Stores document metadata and text chunks with vector embeddings in Supabase pgvector,
+    and automatically generates and attaches an executive summary of the document.
+    """
+    if not user_id:
+        raise ValueError("User must be authenticated to upload documents.")
 
-def store_chunks(chunks, filename, generate_embedding):
+    if not chunks:
+        raise ValueError(f"No text chunks found in {filename} to store.")
 
-    delete_existing_document(
-        filename
-    )
+    # 1. Clear any existing document with the same name for this user
+    delete_existing_document(filename, user_id)
 
-    documents = []
-    embeddings = []
-    metadatas = []
-    ids = []
+    # 2. Insert document record
+    doc_response = supabase.table("documents").insert({
+        "user_id": user_id,
+        "filename": filename
+    }).execute()
 
+    if not doc_response.data:
+        raise RuntimeError(f"Failed to create document record for {filename}")
+
+    document_id = doc_response.data[0]["id"]
+
+    # 3. Prepare chunk records with embeddings
+    chunk_records = []
     for chunk in chunks:
-
-        documents.append(
-            chunk["text"]
-        )
-
-        embeddings.append(
-            generate_embedding(
-                chunk["text"]
-            )
-        )
-
-        metadatas.append({
-            "page": chunk["page"],
-            "source": filename,
-            "chunk_length": len(chunk["text"])
+        embedding = generate_embedding(chunk["text"])
+        chunk_records.append({
+            "document_id": document_id,
+            "user_id": user_id,
+            "content": chunk["text"],
+            "metadata": {
+                "page": chunk.get("page", 1),
+                "source": filename,
+                "chunk_length": len(chunk["text"])
+            },
+            "embedding": embedding
         })
 
-        ids.append(
-            str(uuid.uuid4())
-        )
+    # 4. Insert chunks in batches of 50 to avoid request payload size limits
+    batch_size = 50
+    for i in range(0, len(chunk_records), batch_size):
+        batch = chunk_records[i:i+batch_size]
+        supabase.table("document_chunks").insert(batch).execute()
 
-    collection.add(
-        documents=documents,
-        embeddings=embeddings,
-        metadatas=metadatas,
-        ids=ids
-    )
+    # 5. Generate and save document summary (with graceful fallback if LLM times out)
+    try:
+        summary_text = generate_summary(chunks)
+    except Exception as exc:
+        summary_text = f"Summary generation unavailable: {str(exc)}"
+    
+    try:
+        supabase.table("documents") \
+            .update({"summary": summary_text}) \
+            .eq("id", document_id) \
+            .execute()
+    except Exception:
+        pass
+        
+    return summary_text

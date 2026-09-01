@@ -5,64 +5,31 @@ def chunk_text(
     chunk_size=1200,
     overlap=200
 ):
-
+    """
+    Chunks document pages into semantically cohesive passages while strictly
+    preserving the source page number for each chunk without injecting noisy marker tags.
+    """
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=chunk_size,
-        chunk_overlap=overlap
-    )
-
-    merged_text = ""
-
-    page_boundaries = []
-
-    current_pos = 0
-
-    for page in pages:
-
-        marker = (
-            f"\n\n---PAGE {page['page']}---\n\n"
-        )
-
-        merged_text += marker
-        current_pos += len(marker)
-
-        start_pos = current_pos
-
-        merged_text += page["text"]
-
-        current_pos += len(page["text"])
-
-        page_boundaries.append(
-            (
-                start_pos,
-                current_pos,
-                page["page"]
-            )
-        )
-
-    splits = splitter.split_text(
-        merged_text
+        chunk_overlap=overlap,
+        separators=["\n\n", "\n", ". ", " ", ""]
     )
 
     chunks = []
+    for page_data in pages:
+        page_num = page_data.get("page", 1)
+        text = page_data.get("text", "")
 
-    cursor = 0
+        if not text.strip():
+            continue
 
-    for split in splits:
-
-        page_num = 1
-
-        for start,end,page in page_boundaries:
-
-            if start <= cursor <= end:
-                page_num = page
-                break
-
-        chunks.append({
-            "text": split,
-            "page": page_num
-        })
-
-        cursor += len(split)
+        page_splits = splitter.split_text(text)
+        for split in page_splits:
+            clean_split = split.strip()
+            if clean_split:
+                chunks.append({
+                    "text": clean_split,
+                    "page": page_num
+                })
 
     return chunks
