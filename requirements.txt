@@ -1,7 +1,7 @@
 streamlit
 chromadb
-torchvision
 sentence-transformers
+torchvision
 langchain-text-splitters
 rank-bm25
 groq
@@ -14,3 +14,4 @@ pandas
 numpy
 scikit-learn
 protobuf<4.0.0
+supabase
