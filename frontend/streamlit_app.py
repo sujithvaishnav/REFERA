@@ -36,6 +36,39 @@ importlib.reload(rag.summarizer)
 importlib.reload(rag.reranker)
 importlib.reload(rag.cache)
 
+# Page Configuration
+st.set_page_config(
+    page_title="ReferA | AI Research Assistant",
+    page_icon="📚",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+from rag.vectordb import get_config_var
+
+# Check for required credentials in Environment or Streamlit Secrets
+supabase_url = get_config_var("SUPABASE_URL")
+supabase_key = get_config_var("SUPABASE_KEY")
+groq_key = get_config_var("GROQ_API_KEY")
+
+if not supabase_url or not supabase_key or not groq_key:
+    st.markdown("<h1 style='text-align:center;'>⚙️ ReferA Cloud Setup Required</h1>", unsafe_allow_html=True)
+    st.error("❌ **Missing API Credentials**: `SUPABASE_URL`, `SUPABASE_KEY`, or `GROQ_API_KEY` are not set.")
+    st.markdown("""
+    ### How to configure Secrets on Streamlit Community Cloud:
+    1. Look at the bottom-right corner of your Streamlit Cloud screen and click **Manage app**.
+    2. Click the **⋮ (three dots menu)** and select **Settings**.
+    3. Click on the **Secrets** tab on the left.
+    4. Paste your credentials in TOML format:
+    ```toml
+    GROQ_API_KEY = "gsk_your_groq_api_key_here"
+    SUPABASE_URL = "https://your-project-id.supabase.co"
+    SUPABASE_KEY = "your_supabase_anon_publishable_key_here"
+    ```
+    5. Click **Save**. Your app will automatically reload and launch!
+    """)
+    st.stop()
+
 try:
     from rag.parser import extract_text_from_pdf
     from rag.chunker import chunk_text
@@ -46,16 +79,8 @@ try:
     from rag.reranker import rerank_documents
 except Exception as init_err:
     st.error(f"⚠️ Error initializing backend RAG modules: {init_err}")
-    st.info("Please make sure you have filled in your .env file with valid SUPABASE_URL, SUPABASE_KEY, and GROQ_API_KEY.")
+    st.info("Please make sure you have filled in your .env file or Streamlit Secrets with valid SUPABASE_URL, SUPABASE_KEY, and GROQ_API_KEY.")
     st.stop()
-
-# Page Configuration
-st.set_page_config(
-    page_title="ReferA | AI Research Assistant",
-    page_icon="📚",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Custom CSS for Premium Academic & Research UI
 st.markdown("""

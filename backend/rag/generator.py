@@ -7,12 +7,32 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-client = Groq(
-    api_key=os.getenv("GROQ_API_KEY")
-)
+def get_config_var(key: str, default: str = None) -> str:
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return default
+
+client = None
+
+def get_groq_client():
+    global client
+    if client is not None:
+        return client
+    api_key = get_config_var("GROQ_API_KEY")
+    if not api_key:
+        raise ValueError("GROQ_API_KEY must be set in your .env file or Streamlit Secrets.")
+    client = Groq(api_key=api_key)
+    return client
 
 FALLBACK_MODELS = [
-    os.getenv("GROQ_MODEL", "qwen/qwen3.8-27b"),
+    get_config_var("GROQ_MODEL", "qwen/qwen3.8-27b"),
     "qwen/qwen3.8-27b",
     "groq/compound-mini",
     "openai/gpt-oss-120b",
@@ -25,15 +45,15 @@ def create_groq_completion(**kwargs):
     """
     Attempts completion with preferred model and gracefully falls back across available Groq models.
     """
+    c = get_groq_client()
     last_exception = None
-    # Deduplicate while preserving priority
     seen = set()
     models_to_try = [m for m in FALLBACK_MODELS if m and not (m in seen or seen.add(m))]
 
     for model_name in models_to_try:
         try:
             kwargs["model"] = model_name
-            return client.chat.completions.create(**kwargs)
+            return c.chat.completions.create(**kwargs)
         except Exception as e:
             err_str = str(e)
             last_exception = e

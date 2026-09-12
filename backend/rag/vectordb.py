@@ -5,19 +5,41 @@ from rag.summarizer import generate_summary
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+def get_config_var(key: str, default: str = None) -> str:
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return default
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in the .env file")
+SUPABASE_URL = get_config_var("SUPABASE_URL")
+SUPABASE_KEY = get_config_var("SUPABASE_KEY")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if (SUPABASE_URL and SUPABASE_KEY) else None
+
+def get_supabase_client(client: Client = None) -> Client:
+    global supabase
+    if client:
+        return client
+    if supabase:
+        return supabase
+    url = get_config_var("SUPABASE_URL")
+    key = get_config_var("SUPABASE_KEY")
+    if url and key:
+        supabase = create_client(url, key)
+        return supabase
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be configured in your .env file or Streamlit Secrets.")
 
 def delete_existing_document(filename: str, user_id: str, client: Client = None):
     """
     Deletes the document metadata and all associated chunks from Supabase by filename and user_id.
     """
-    c = client or supabase
+    c = get_supabase_client(client)
     if not user_id or not filename:
         return
         
@@ -31,7 +53,7 @@ def delete_document_by_id(document_id: str, user_id: str, client: Client = None)
     """
     Deletes the document and cascaded chunks by document UUID and user_id.
     """
-    c = client or supabase
+    c = get_supabase_client(client)
     if not user_id or not document_id:
         return
         
@@ -45,7 +67,7 @@ def get_user_documents(user_id: str = None, client: Client = None):
     """
     Retrieves all document records for a given user.
     """
-    c = client or supabase
+    c = get_supabase_client(client)
     query = c.table("documents").select("id", "filename", "summary", "created_at")
     if user_id:
         query = query.eq("user_id", user_id)
@@ -57,7 +79,7 @@ def store_chunks(chunks, filename: str, generate_embedding, user_id: str = None,
     Stores document metadata and text chunks with vector embeddings in Supabase pgvector,
     and automatically generates and attaches an executive summary of the document.
     """
-    c = client or supabase
+    c = get_supabase_client(client)
     if not user_id:
         raise ValueError("User must be authenticated to upload documents.")
 

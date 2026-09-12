@@ -5,13 +5,35 @@ from rank_bm25 import BM25Okapi
 
 load_dotenv()
 
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+def get_config_var(key: str, default: str = None) -> str:
+    val = os.getenv(key)
+    if val:
+        return val
+    try:
+        import streamlit as st
+        if hasattr(st, "secrets") and key in st.secrets:
+            return str(st.secrets[key])
+    except Exception:
+        pass
+    return default
 
-if not SUPABASE_URL or not SUPABASE_KEY:
-    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in the .env file")
+SUPABASE_URL = get_config_var("SUPABASE_URL")
+SUPABASE_KEY = get_config_var("SUPABASE_KEY")
 
-supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_KEY) if (SUPABASE_URL and SUPABASE_KEY) else None
+
+def get_supabase_client(client: Client = None) -> Client:
+    global supabase
+    if client:
+        return client
+    if supabase:
+        return supabase
+    url = get_config_var("SUPABASE_URL")
+    key = get_config_var("SUPABASE_KEY")
+    if url and key:
+        supabase = create_client(url, key)
+        return supabase
+    raise ValueError("SUPABASE_URL and SUPABASE_KEY must be configured in your .env file or Streamlit Secrets.")
 
 bm25_index = None
 bm25_documents = []
@@ -21,7 +43,7 @@ def build_bm25_index(user_id=None, client: Client = None):
     """
     Fetches all chunks uploaded by the user to build/rebuild the BM25 index in memory.
     """
-    c = client or supabase
+    c = get_supabase_client(client)
     global bm25_index
     global bm25_documents
     global bm25_metadatas
@@ -33,12 +55,15 @@ def build_bm25_index(user_id=None, client: Client = None):
         return
 
     # Fetch all chunks from Supabase for this user
-    response = c.table("document_chunks") \
-        .select("content", "metadata") \
-        .eq("user_id", user_id) \
-        .execute()
+    try:
+        response = c.table("document_chunks") \
+            .select("content", "metadata") \
+            .eq("user_id", user_id) \
+            .execute()
+        data = response.data or []
+    except Exception:
+        data = []
 
-    data = response.data or []
     if not data:
         bm25_index = None
         bm25_documents = []
@@ -63,7 +88,7 @@ def retrieve(query, user_id=None, top_k=5, selected_docs=None, client: Client = 
     """
     Queries Supabase using pgvector cosine similarity search.
     """
-    c = client or supabase
+    c = get_supabase_client(client)
     if not user_id:
         return {"documents": [[]], "metadatas": [[]]}
 
@@ -234,7 +259,7 @@ def hybrid_retrieve(
     Executes hybrid retrieval by combining dense semantic search (pgvector)
     and lexical search (BM25) via Reciprocal Rank Fusion (RRF).
     """
-    c = client or supabase
+    c = get_supabase_client(client)
     dense_results = retrieve(
         query,
         user_id=user_id,
