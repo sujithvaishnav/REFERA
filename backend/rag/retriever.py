@@ -17,10 +17,11 @@ bm25_index = None
 bm25_documents = []
 bm25_metadatas = []
 
-def build_bm25_index(user_id=None):
+def build_bm25_index(user_id=None, client: Client = None):
     """
     Fetches all chunks uploaded by the user to build/rebuild the BM25 index in memory.
     """
+    c = client or supabase
     global bm25_index
     global bm25_documents
     global bm25_metadatas
@@ -32,7 +33,7 @@ def build_bm25_index(user_id=None):
         return
 
     # Fetch all chunks from Supabase for this user
-    response = supabase.table("document_chunks") \
+    response = c.table("document_chunks") \
         .select("content", "metadata") \
         .eq("user_id", user_id) \
         .execute()
@@ -58,10 +59,11 @@ def build_bm25_index(user_id=None):
 
     bm25_index = BM25Okapi(tokenized_docs)
 
-def retrieve(query, user_id=None, top_k=5, selected_docs=None):
+def retrieve(query, user_id=None, top_k=5, selected_docs=None, client: Client = None):
     """
     Queries Supabase using pgvector cosine similarity search.
     """
+    c = client or supabase
     if not user_id:
         return {"documents": [[]], "metadatas": [[]]}
 
@@ -80,7 +82,7 @@ def retrieve(query, user_id=None, top_k=5, selected_docs=None):
         params["filter_filenames"] = selected_docs
 
     try:
-        response = supabase.rpc("match_document_chunks", params).execute()
+        response = c.rpc("match_document_chunks", params).execute()
         data = response.data or []
     except Exception:
         data = []
@@ -225,22 +227,25 @@ def hybrid_retrieve(
     user_id=None,
     top_k_dense=8,
     top_k_bm25=5,
-    selected_docs=None
+    selected_docs=None,
+    client: Client = None
 ):
     """
     Executes hybrid retrieval by combining dense semantic search (pgvector)
     and lexical search (BM25) via Reciprocal Rank Fusion (RRF).
     """
+    c = client or supabase
     dense_results = retrieve(
         query,
         user_id=user_id,
         top_k=top_k_dense,
-        selected_docs=selected_docs
+        selected_docs=selected_docs,
+        client=c
     )
 
     global bm25_index
     if bm25_index is None and user_id:
-        build_bm25_index(user_id)
+        build_bm25_index(user_id, client=c)
 
     if bm25_index is None:
         return dense_results

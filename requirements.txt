@@ -15,3 +15,4 @@ numpy
 scikit-learn
 protobuf<4.0.0
 supabase
+redis

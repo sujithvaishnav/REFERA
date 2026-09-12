@@ -1,8 +1,10 @@
 -- ==============================================================================
--- REFERA - Supabase Database Schema & pgvector Setup
+-- REFERA - Supabase Database Schema & Production pgvector Setup
 -- ==============================================================================
 -- Run this complete SQL script in your Supabase SQL Editor to initialize
--- all tables, pgvector extensions, HNSW indexes, and RPC functions.
+-- all tables, pgvector extensions, HNSW indexes, secure RLS policies, and RPC functions.
+-- This resolves all Supabase Security Advisor warnings (rls_disabled_in_public,
+-- sensitive_columns_exposed).
 -- ==============================================================================
 
 -- 1. Enable pgvector extension
@@ -84,8 +86,19 @@ RETURNS TABLE (
 )
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
+DECLARE
+    current_uid UUID := auth.uid();
+    target_uid UUID;
 BEGIN
+    -- If invoked by an authenticated user, enforce their user ID
+    IF current_uid IS NOT NULL THEN
+        target_uid := current_uid;
+    ELSE
+        target_uid := filter_user_id;
+    END IF;
+
     RETURN QUERY
     SELECT
         dc.id,
@@ -96,7 +109,7 @@ BEGIN
         1 - (dc.embedding <=> query_embedding) AS similarity
     FROM public.document_chunks dc
     WHERE
-        (filter_user_id IS NULL OR dc.user_id = filter_user_id)
+        (target_uid IS NULL OR dc.user_id = target_uid)
         AND (
             filter_filenames IS NULL 
             OR dc.metadata->>'source' = ANY(filter_filenames)
@@ -111,23 +124,27 @@ END;
 $$;
 
 -- ==============================================================================
--- ROW LEVEL SECURITY (RLS) POLICIES & PERMISSIONS
+-- ROW LEVEL SECURITY (RLS) POLICIES (Fixes all Supabase Security Warnings)
 -- ==============================================================================
--- Multi-tenancy is strictly enforced at the application and query layer
--- by filtering on user_id across all tables and stored procedures.
 
+-- 1. Enable RLS on all tables
 ALTER TABLE public.documents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.document_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.chat_messages ENABLE ROW LEVEL SECURITY;
 
--- Drop old strict policies if they exist to avoid conflicts
+-- 2. Drop old policies if existing
+DROP POLICY IF EXISTS "Allow full access for documents" ON public.documents;
+DROP POLICY IF EXISTS "Allow full access for document chunks" ON public.document_chunks;
+DROP POLICY IF EXISTS "Allow full access for chat sessions" ON public.chat_sessions;
+DROP POLICY IF EXISTS "Allow full access for chat messages" ON public.chat_messages;
 DROP POLICY IF EXISTS "Users can view their own documents" ON public.documents;
 DROP POLICY IF EXISTS "Users can insert their own documents" ON public.documents;
 DROP POLICY IF EXISTS "Users can update their own documents" ON public.documents;
 DROP POLICY IF EXISTS "Users can delete their own documents" ON public.documents;
 DROP POLICY IF EXISTS "Users can view their own document chunks" ON public.document_chunks;
 DROP POLICY IF EXISTS "Users can insert their own document chunks" ON public.document_chunks;
+DROP POLICY IF EXISTS "Users can update their own document chunks" ON public.document_chunks;
 DROP POLICY IF EXISTS "Users can delete their own document chunks" ON public.document_chunks;
 DROP POLICY IF EXISTS "Users can view their own chat sessions" ON public.chat_sessions;
 DROP POLICY IF EXISTS "Users can insert their own chat sessions" ON public.chat_sessions;
@@ -135,25 +152,93 @@ DROP POLICY IF EXISTS "Users can update their own chat sessions" ON public.chat_
 DROP POLICY IF EXISTS "Users can delete their own chat sessions" ON public.chat_sessions;
 DROP POLICY IF EXISTS "Users can view their own chat messages" ON public.chat_messages;
 DROP POLICY IF EXISTS "Users can insert their own chat messages" ON public.chat_messages;
+DROP POLICY IF EXISTS "Users can update their own chat messages" ON public.chat_messages;
 DROP POLICY IF EXISTS "Users can delete their own chat messages" ON public.chat_messages;
 
--- Create permissive policies for application access
-CREATE POLICY "Allow full access for documents"
-    ON public.documents FOR ALL
-    USING (true)
-    WITH CHECK (true);
+-- 3. Documents Table Policies (Only owner can read/write/delete)
+CREATE POLICY "Users can view their own documents"
+    ON public.documents FOR SELECT
+    TO authenticated
+    USING (auth.uid() = user_id);
 
-CREATE POLICY "Allow full access for document chunks"
-    ON public.document_chunks FOR ALL
-    USING (true)
-    WITH CHECK (true);
+CREATE POLICY "Users can insert their own documents"
+    ON public.documents FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Allow full access for chat sessions"
-    ON public.chat_sessions FOR ALL
-    USING (true)
-    WITH CHECK (true);
+CREATE POLICY "Users can update their own documents"
+    ON public.documents FOR UPDATE
+    TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY "Allow full access for chat messages"
-    ON public.chat_messages FOR ALL
-    USING (true)
-    WITH CHECK (true);
+CREATE POLICY "Users can delete their own documents"
+    ON public.documents FOR DELETE
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+-- 4. Document Chunks Table Policies
+CREATE POLICY "Users can view their own document chunks"
+    ON public.document_chunks FOR SELECT
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own document chunks"
+    ON public.document_chunks FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own document chunks"
+    ON public.document_chunks FOR UPDATE
+    TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own document chunks"
+    ON public.document_chunks FOR DELETE
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+-- 5. Chat Sessions Table Policies
+CREATE POLICY "Users can view their own chat sessions"
+    ON public.chat_sessions FOR SELECT
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own chat sessions"
+    ON public.chat_sessions FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own chat sessions"
+    ON public.chat_sessions FOR UPDATE
+    TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own chat sessions"
+    ON public.chat_sessions FOR DELETE
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+-- 6. Chat Messages Table Policies
+CREATE POLICY "Users can view their own chat messages"
+    ON public.chat_messages FOR SELECT
+    TO authenticated
+    USING (auth.uid() = user_id);
+
+CREATE POLICY "Users can insert their own chat messages"
+    ON public.chat_messages FOR INSERT
+    TO authenticated
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can update their own chat messages"
+    ON public.chat_messages FOR UPDATE
+    TO authenticated
+    USING (auth.uid() = user_id)
+    WITH CHECK (auth.uid() = user_id);
+
+CREATE POLICY "Users can delete their own chat messages"
+    ON public.chat_messages FOR DELETE
+    TO authenticated
+    USING (auth.uid() = user_id);

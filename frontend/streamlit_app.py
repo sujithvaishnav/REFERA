@@ -466,7 +466,8 @@ with st.sidebar:
                             chunks=chunks,
                             filename=uploaded_file.name,
                             generate_embedding=generate_embedding,
-                            user_id=user.id
+                            user_id=user.id,
+                            client=supabase
                         )
 
                         st.session_state.last_uploaded_summary = {
@@ -476,7 +477,7 @@ with st.sidebar:
                             "chunks": len(chunks)
                         }
 
-                        build_bm25_index(user.id)
+                        build_bm25_index(user.id, client=supabase)
                         st.success(f"✅ Indexed {len(chunks)} chunks from {len(pages)} pages!")
                         time.sleep(1.0)
                         st.rerun()
@@ -504,8 +505,8 @@ with st.sidebar:
                 if doc_info.get("summary"):
                     st.caption(f"{doc_info['summary'][:160]}...")
                 if st.button(f"🗑️ Delete {fname}", key=f"del_{doc_info['id']}"):
-                    delete_document_by_id(doc_info["id"], user.id)
-                    build_bm25_index(user.id)
+                    delete_document_by_id(doc_info["id"], user.id, client=supabase)
+                    build_bm25_index(user.id, client=supabase)
                     st.success(f"Deleted {fname}")
                     time.sleep(0.5)
                     st.rerun()
@@ -603,7 +604,8 @@ if user_query:
                 retrieved_docs = hybrid_retrieve(
                     query=enhanced_query,
                     user_id=user.id,
-                    selected_docs=selected_docs
+                    selected_docs=selected_docs,
+                    client=supabase
                 )
                 
                 # Cross-Encoder Reranking

@@ -3,8 +3,6 @@ import json
 import hashlib
 import logging
 
-import redis
-
 logger = logging.getLogger(__name__)
 
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
@@ -12,6 +10,14 @@ CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", 3600))  # 1 hour
 
 _client = None
 _redis_available = True
+
+try:
+    import redis
+    import redis.exceptions
+except ImportError:
+    redis = None
+    _redis_available = False
+    logger.info("redis package not installed, caching disabled gracefully.")
 
 
 def get_client():
@@ -22,7 +28,7 @@ def get_client():
     """
     global _client, _redis_available
 
-    if not _redis_available:
+    if not _redis_available or redis is None:
         return None
 
     if _client is None:
@@ -34,7 +40,7 @@ def get_client():
                 decode_responses=True,
             )
             _client.ping()
-        except redis.exceptions.RedisError as exc:
+        except Exception as exc:
             logger.warning(f"Redis unavailable, caching disabled: {exc}")
             _redis_available = False
             _client = None
@@ -71,7 +77,7 @@ def get_cached_answer(cache_key):
 
     try:
         cached = client.get(cache_key)
-    except redis.exceptions.RedisError as exc:
+    except Exception as exc:
         logger.warning(f"Redis GET failed, treating as cache miss: {exc}")
         return None
 
@@ -97,7 +103,7 @@ def set_cached_answer(cache_key, answer, sources, ttl=CACHE_TTL_SECONDS):
 
     try:
         client.setex(cache_key, ttl, payload)
-    except redis.exceptions.RedisError as exc:
+    except Exception as exc:
         logger.warning(f"Redis SET failed, continuing without caching: {exc}")
 
 
@@ -114,7 +120,7 @@ def get_cached_embedding(text):
 
     try:
         cached = client.get(make_embedding_cache_key(text))
-    except redis.exceptions.RedisError as exc:
+    except Exception as exc:
         logger.warning(f"Redis GET failed, treating as cache miss: {exc}")
         return None
 
@@ -143,5 +149,5 @@ def set_cached_embedding(text, embedding, ttl=None):
             client.setex(key, ttl, payload)
         else:
             client.set(key, payload)
-    except redis.exceptions.RedisError as exc:
+    except Exception as exc:
         logger.warning(f"Redis SET failed, continuing without caching: {exc}")
